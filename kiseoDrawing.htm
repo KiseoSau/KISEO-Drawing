@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!--
+    Program name:KISEO: Drawing
+    Developer: Jesse Phillips
+    Date: 2/6/2026
+    Purpose: Drawing Application For Hackathon
+-->
+
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KISEO: Drawing Application</title>
+    <style>
+    
+    
+        /* Basic page styling */
+        body, html {
+            margin: 0;
+            padding: 0;
+            background: #888;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            margin: 0;
+            padding: 10px;
+            background: #333;
+            color: white;
+            text-align: center;
+        }
+
+        .main {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+
+        /* Toolbar styling */
+        .toolbar {
+            display: grid;
+            grid-template-columns: repeat(2, 60px);
+            gap: 10px;
+            padding: 10px;
+            background: #555;
+            justify-content: center;
+            position: relative;
+        }
+
+        .toolbar button {
+            width: 60px;
+            height: 60px;
+            font-size: 18px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: white;
+        }
+
+        .toolbar button.active {
+            background: #777;
+            color: white;
+        }
+
+        .toolbar input[type=color] {
+            width: 60px;
+            height: 60px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .toolbar button:hover {
+            background: #bbb;
+        }
+
+
+        /* Settings panels for pen/bucket */
+        #penSettings, #bucketSettings {
+            display: none;
+            position: absolute;
+            left: 80px;
+            top: 10px;
+            background: #555;
+            padding: 10px;
+            border-radius: 4px;
+            color: white;
+            z-index: 10;
+        }
+
+        #penSettings label, #bucketSettings label {
+            display: block;
+            margin-top: 5px;
+        }
+
+        .transparencyRow {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .transparencyRow input[type=number] {
+            width: 60px;
+        }
+
+
+        /* Canvas container */
+        #canvasContainer {
+            width: 80vw;
+            max-width: 800px;
+            height: 80vw;
+            max-height: 800px;
+            border: 2px solid #555;
+            background: #888;
+            overflow: hidden;
+            position: relative;
+            margin-left: 10px;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+            background: transparent;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>KISEO: Drawing</h1>
+
+    <div class="main">
+        <div class="toolbar">
+            <button id="pen" class="active">🖌</button>
+            <button id="bucket">⬙﹅</button>
+            <input type="color" id="colorPicker" value="#000000">
+            <button id="line">／</button>
+            <button id="square">▢</button>
+            <button id="circle">◯</button>
+            <!--<button id="blend">Blend</button>-->
+            <!--<button id="blur">Blur</button>-->
+            <button id="undo">↺</button>
+            <button id="redo">↻</button>
+            <button id="clear">Clear</button>
+            <button id="save">🖪</button>
+
+            <!-- Pen settings panel -->
+            <div id="penSettings">
+                <label>Size: <input type="range" id="penSize" min="1" max="50" value="3"></label>
+                <label>Transparency:
+                    <div class="transparencyRow">
+                        <input type="range" id="penAlphaSlider" min="0" max="100" value="100">
+                        <input type="number" id="penAlphaNumber" min="0" max="100" value="100">
+                    </div>
+                </label>
+            </div>
+
+            <!-- Bucket settings panel -->
+            <div id="bucketSettings">
+                <label>Transparency:
+                    <div class="transparencyRow">
+                        <input type="range" id="bucketAlphaSlider" min="0" max="100" value="100">
+                        <input type="number" id="bucketAlphaNumber" min="0" max="100" value="100">
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <div id="canvasContainer">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // -------------------------
+        // Setup canvas and state
+        // -------------------------
+        const cont = document.getElementById('canvasContainer');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const offCanvas = document.createElement('canvas');
+        const offCtx = offCanvas.getContext('2d');
+
+        let tool = 'pen';
+        let drawing = false;
+        let last = { x: 0, y: 0 };
+        let history = [];
+        let redoStack = [];
+
+        let scale = 1;
+        let offset = { x: 0, y: 0 };
+        let dragging = false;
+        let dragStart = { x: 0, y: 0 };
+
+        let penSize = 3;
+        let penAlpha = 1;
+        let bucketAlpha = 1;
+
+        // DOM elements
+        const penBtn = document.getElementById('pen');
+        const bucketBtn = document.getElementById('bucket');
+        const lineBtn = document.getElementById('line');
+        const circleBtn = document.getElementById('circle');
+        const squareBtn = document.getElementById('square');
+        const colorPicker = document.getElementById('colorPicker');
+        const undoBtn = document.getElementById('undo');
+        const redoBtn = document.getElementById('redo');
+        const clearBtn = document.getElementById('clear');
+        const saveBtn = document.getElementById('save');
+        const penSettingsDiv = document.getElementById('penSettings');
+        const bucketSettingsDiv = document.getElementById('bucketSettings');
+        const penSizeInput = document.getElementById('penSize');
+        const penAlphaSlider = document.getElementById('penAlphaSlider');
+        const penAlphaNumber = document.getElementById('penAlphaNumber');
+        const bucketAlphaSlider = document.getElementById('bucketAlphaSlider');
+        const bucketAlphaNumber = document.getElementById('bucketAlphaNumber');
+
+        // -------------------------
+        // Initialize canvas size
+        // -------------------------
+        function init() {
+            let size = Math.min(cont.clientWidth, cont.clientHeight);
+            canvas.width = size;
+            canvas.height = size;
+            offCanvas.width = size;
+            offCanvas.height = size;
+
+            // fill white background
+            offCtx.fillStyle = "#fff";
+            offCtx.fillRect(0, 0, size, size);
+
+            saveState();
+        }
+
+        init();
+
+        window.addEventListener('resize', () => {
+            let tmp = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+            init();
+            offCtx.putImageData(tmp, 0, 0);
+            draw();
+        });
+
+        // -------------------------
+        // Tool selection
+        // -------------------------
+        function setActive(btn) {
+            [penBtn, bucketBtn, lineBtn, circleBtn, squareBtn].forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        penBtn.onclick = () => {
+            setActive(penBtn);
+            if (tool === 'pen') {
+                penSettingsDiv.style.display = penSettingsDiv.style.display === 'block' ? 'none' : 'block';
+                bucketSettingsDiv.style.display = 'none';
+            } else {
+                tool = 'pen';
+                penSettingsDiv.style.display = 'none';
+                bucketSettingsDiv.style.display = 'none';
+            }
+        };
+
+        bucketBtn.onclick = () => {
+            setActive(bucketBtn);
+            if (tool === 'bucket') {
+                bucketSettingsDiv.style.display = bucketSettingsDiv.style.display === 'block' ? 'none' : 'block';
+                penSettingsDiv.style.display = 'none';
+            } else {
+                tool = 'bucket';
+                bucketSettingsDiv.style.display = 'none';
+                penSettingsDiv.style.display = 'none';
+            }
+        };
+
+        lineBtn.onclick = () => { tool = 'line'; setActive(lineBtn); penSettingsDiv.style.display = 'none'; bucketSettingsDiv.style.display = 'none'; };
+        squareBtn.onclick = () => { tool = 'square'; setActive(squareBtn); penSettingsDiv.style.display = 'none'; bucketSettingsDiv.style.display = 'none'; };
+        circleBtn.onclick = () => { tool = 'circle'; setActive(circleBtn); penSettingsDiv.style.display = 'none'; bucketSettingsDiv.style.display = 'none'; };
+
+        undoBtn.onclick = undo;
+        redoBtn.onclick = redo;
+        saveBtn.onclick = savePNG;
+
+        clearBtn.onclick = () => {
+            offCtx.fillStyle = "#fff";
+            offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+            history = [];
+            redoStack = [];
+            saveState();
+            draw();
+        };
+
+        // -------------------------
+        // Pen & Bucket controls
+        // -------------------------
+        penSizeInput.oninput = () => penSize = parseInt(penSizeInput.value);
+
+        penAlphaSlider.oninput = () => {
+            penAlpha = penAlphaSlider.value / 100;
+            penAlphaNumber.value = penAlphaSlider.value;
+        };
+
+        penAlphaNumber.oninput = () => {
+            let v = parseInt(penAlphaNumber.value);
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            penAlpha = v / 100;
+            penAlphaSlider.value = v;
+        };
+
+        bucketAlphaSlider.oninput = () => {
+            bucketAlpha = bucketAlphaSlider.value / 100;
+            bucketAlphaNumber.value = bucketAlphaSlider.value;
+        };
+
+        bucketAlphaNumber.oninput = () => {
+            let v = parseInt(bucketAlphaNumber.value);
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            bucketAlpha = v / 100;
+            bucketAlphaSlider.value = v;
+        };
+
+        // -------------------------
+        // Mouse coordinate helpers
+        // -------------------------
+        function screenToCanvas(x, y) {
+            return { x: (x - offset.x) / scale, y: (y - offset.y) / scale };
+        }
+
+        let tempCanvas = null, tempCtx = null;
+
+        // -------------------------
+        // Mouse events
+        // -------------------------
+        canvas.addEventListener('mousedown', e => {
+            if (e.button === 1 || e.altKey) {
+                dragging = true;
+                dragStart = { x: e.clientX - offset.x, y: e.clientY - offset.y };
+                return;
+            }
+            if (e.button !== 0) return;
+
+            const pos = screenToCanvas(e.offsetX, e.offsetY);
+
+            if (tool === 'pen') {
+                drawing = true;
+                last = pos;
+
+                tempCanvas = document.createElement('canvas');
+                tempCanvas.width = offCanvas.width;
+                tempCanvas.height = offCanvas.height;
+                tempCtx = tempCanvas.getContext('2d');
+                tempCtx.lineCap = 'round';
+                tempCtx.lineJoin = 'round';
+                tempCtx.strokeStyle = colorPicker.value;
+                tempCtx.lineWidth = penSize;
+                tempCtx.globalAlpha = penAlpha;
+                tempCtx.globalCompositeOperation = 'copy';
+                tempCtx.beginPath();
+                tempCtx.moveTo(pos.x, pos.y);
+            } else if (tool === 'bucket') {
+                bucketFill(Math.floor(pos.x), Math.floor(pos.y), hexToRgb(colorPicker.value), bucketAlpha);
+                saveState();
+                draw();
+            } else {
+                drawing = true;
+                last = pos;
+                tempCanvas = document.createElement('canvas');
+                tempCanvas.width = offCanvas.width;
+                tempCanvas.height = offCanvas.height;
+                tempCtx = tempCanvas.getContext('2d');
+                tempCtx.strokeStyle = colorPicker.value;
+                tempCtx.lineWidth = penSize;
+                tempCtx.globalAlpha = penAlpha;
+                tempCtx.beginPath();
+            }
+        });
+
+        canvas.addEventListener('mousemove', e => {
+            if (dragging) {
+                offset.x = e.clientX - dragStart.x;
+                offset.y = e.clientY - dragStart.y;
+                draw();
+                return;
+            }
+
+            if (!drawing) return;
+
+            const pos = screenToCanvas(e.offsetX, e.offsetY);
+
+            if (tool === 'pen') {
+                tempCtx.lineTo(pos.x, pos.y);
+                tempCtx.stroke();
+            } else {
+                let w = pos.x - last.x;
+                let h = pos.y - last.y;
+                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+                if (tool === 'square') tempCtx.strokeRect(last.x, last.y, w, h);
+                else if (tool === 'circle') {
+                    tempCtx.beginPath();
+                    tempCtx.ellipse(last.x + w / 2, last.y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, 2 * Math.PI);
+                    tempCtx.stroke();
+                } else if (tool === 'line') {
+                    tempCtx.beginPath();
+                    tempCtx.moveTo(last.x, last.y);
+                    tempCtx.lineTo(pos.x, pos.y);
+                    tempCtx.stroke();
+                }
+            }
+
+            // redraw canvas
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#888";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.setTransform(scale, 0, 0, scale, offset.x, offset.y);
+            ctx.drawImage(offCanvas, 0, 0);
+            ctx.drawImage(tempCanvas, 0, 0);
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (drawing) {
+                drawing = false;
+                offCtx.drawImage(tempCanvas, 0, 0);
+                saveState();
+                draw();
+                tempCanvas = null;
+                tempCtx = null;
+            }
+            dragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            if (drawing) {
+                offCtx.drawImage(tempCanvas, 0, 0);
+                saveState();
+                drawing = false;
+                tempCanvas = null;
+                tempCtx = null;
+            }
+            dragging = false;
+            draw();
+        });
+
+        // -------------------------
+        // History / Undo / Redo
+        // -------------------------
+        function saveState() {
+            history.push(offCanvas.toDataURL());
+            if (history.length > 50) history.shift();
+            redoStack = [];
+        }
+
+        function undo() {
+            if (history.length > 1) {
+                redoStack.push(history.pop());
+                let img = new Image();
+                img.src = history[history.length - 1];
+                img.onload = () => {
+                    offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+                    offCtx.drawImage(img, 0, 0);
+                    draw();
+                }
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                let imgData = redoStack.pop();
+                let img = new Image();
+                img.src = imgData;
+                img.onload = () => {
+                    offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+                    offCtx.drawImage(img, 0, 0);
+                    draw();
+                }
+                history.push(imgData);
+            }
+        }
+
+        function savePNG() {
+            let link = document.createElement('a');
+            link.download = 'drawing.png';
+            let temp = document.createElement('canvas');
+            temp.width = offCanvas.width;
+            temp.height = offCanvas.height;
+            let tctx = temp.getContext('2d');
+            tctx.fillStyle = "#fff";
+            tctx.fillRect(0, 0, temp.width, temp.height);
+            tctx.drawImage(offCanvas, 0, 0);
+            link.href = temp.toDataURL('image/png');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // -------------------------
+        // Bucket fill algorithm
+        // -------------------------
+        function bucketFill(x, y, fillColor, alpha = 1) {
+            let imgData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+            let data = imgData.data;
+            let w = imgData.width, h = imgData.height;
+            let startColor = getPixelColor(data, x, y, w);
+            if (colorsMatch(startColor, fillColor, 0)) return;
+
+            let queue = [[x, y]];
+            let visited = new Uint8Array(w * h);
+
+            while (queue.length) {
+                let [cx, cy] = queue.shift();
+                let idx = (cy * w + cx) * 4;
+                if (visited[cy * w + cx]) continue;
+
+                let color = [data[idx], data[idx + 1], data[idx + 2], data[idx + 3]];
+                if (!colorsMatch(color, startColor, 0)) continue;
+
+                data[idx] = fillColor[0];
+                data[idx + 1] = fillColor[1];
+                data[idx + 2] = fillColor[2];
+                data[idx + 3] = Math.floor(255 * alpha);
+
+                visited[cy * w + cx] = 1;
+
+                if (cx + 1 < w) queue.push([cx + 1, cy]);
+                if (cx - 1 >= 0) queue.push([cx - 1, cy]);
+                if (cy + 1 < h) queue.push([cx, cy + 1]);
+                if (cy - 1 >= 0) queue.push([cx, cy - 1]);
+            }
+
+            offCtx.putImageData(imgData, 0, 0);
+        }
+
+        // -------------------------
+        // Keyboard shortcuts
+        // -------------------------
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'z') {
+                e.preventDefault();
+                undo();
+            } else if (e.ctrlKey && e.key === 'y') {
+                e.preventDefault();
+                redo();
+            }
+        });
+
+        // -------------------------
+        // Color helpers
+        // -------------------------
+        function getPixelColor(data, x, y, w) {
+            return [data[(y * w + x) * 4], data[(y * w + x) * 4 + 1], data[(y * w + x) * 4 + 2], data[(y * w + x) * 4 + 3]];
+        }
+
+        function colorsMatch(a, b, tol = 0) {
+            return Math.abs(a[0] - b[0]) <= tol &&
+                Math.abs(a[1] - b[1]) <= tol &&
+                Math.abs(a[2] - b[2]) <= tol &&
+                Math.abs(a[3] - b[3]) <= tol;
+        }
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return [parseInt(hex.substr(0, 2), 16), parseInt(hex.substr(2, 2), 16), parseInt(hex.substr(4, 2), 16)];
+        }
+
+        // -------------------------
+        // Zooming / panning
+        // -------------------------
+        cont.addEventListener('wheel', e => {
+            e.preventDefault();
+            let mouse = { x: e.offsetX, y: e.offsetY };
+            let delta = e.deltaY < 0 ? 1.1 : 0.9;
+            let prev = scale;
+            scale *= delta;
+            offset.x = mouse.x - (mouse.x - offset.x) * (scale / prev);
+            offset.y = mouse.y - (mouse.y - offset.y) * (scale / prev);
+            draw();
+        });
+
+        function draw() {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#888";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.setTransform(scale, 0, 0, scale, offset.x, offset.y);
+            ctx.drawImage(offCanvas, 0, 0);
+        }
+
+        draw();
+    </script>
+</body>
+
+</html>
